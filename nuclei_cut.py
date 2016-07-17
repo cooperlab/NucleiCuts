@@ -2,15 +2,12 @@ import histomicstk as htk
 import matplotlib.pyplot as plt
 import numpy as np
 import pygco as gc
-import scipy as sp
 import scipy.ndimage.measurements as ms
 from scipy.stats import multivariate_normal as mvn
 import skimage.io as io
 
 
 def multiway_cut():
-
-    # return label image and seeds
 
     W = np.array([[0.650, 0.072, 0],
                   [0.704, 0.990, 0],
@@ -39,118 +36,29 @@ def multiway_cut():
     # color deconvolutions - normalized
     UN1 = htk.ColorDeconvolution(N1, W)
 
-    # constrained log filtering=== - generate R_{N}(x,y)
+    # generate poisson mixture model for hematoxylin channel
     Nuclei = UN1.Stains[::2, ::2, 0].astype(dtype=np.uint8)
     Tau, Foreground, Background = htk.PoissonMixture(Nuclei)
+
+    # perform a graph cut to distinguish foreground and background
     Mask = binary_cut(Foreground, Background, Nuclei, Sigma=50)
 
+    # constrained log filtering
     Response = htk.cLoG(Nuclei, Mask, SigmaMin=4*1.414, SigmaMax=7*1.414)
+
+    # cluster pixels to constrained log maxima
     Label, Seeds, Max = htk.MaxClustering(Response.copy(), Mask, 10)
-    Filtered = htk.FilterLabel(Label, 4, 80, None)
+
+    # cleanup label image - split, then open by area and width
+    Label = htk.SplitLabel(Label)
+    Label = htk.AreaOpenLabel(Label, 20)
+    Label = htk.WidthOpenLabel(Label, 5)
 
     # multiway graph cut refinement of max-clustering segmentation
-    _multiway_refine(Nuclei, Response, Filtered, Background=5e-1,
-                     Smoothness=1e-5)
+    Label = _multiway_refine(Nuclei, Response, Label, Background=5e-1,
+                             Smoothness=1e-5)
 
-    return
-
-
-def binary_cut(Foreground, Background, I=None, Sigma=None):
-    """Performs a binary graph-cut optimization for region masking, given
-    foreground and background probabilities for image and
-
-    Parameters
-    ----------
-    I : array_like
-        An intensity image used for calculating the continuity term. If not
-        provided, only the data term from the foreground/background model will
-        drive the graph-cut optimization. Default value = None.
-    Foreground : array_like
-        Intensity image the same size as 'I' with values in the range [0, 1]
-        representing probabilities that each pixel is in the foreground class.
-    Background : array_like
-        Intensity image the same size as 'I' with values in the range [0, 1]
-        representing probabilities that each pixel is in the background class.
-    Sigma : double
-        Parameter controling exponential decay rate of continuity term. Units
-        are intensity values. Recommended ~10% of dynamic range of image.
-        Defaults to 25 if 'I' is type uint8 (range [0, 255]), and 0.1 if type
-        is float (expected range [0, 1]). Default value = None.
-
-    Notes
-    -----
-    The graph cutting algorithm is sensitive to the magnitudes of weights in
-    the data variable 'D'. Small probabilities will be magnified by the
-    logarithm in formulating this cost, and so we add a small positive value
-    to each in order to scale them appropriately.
-
-    Returns
-    -------
-    Mask : array_like
-        A boolean-type binary mask indicating the foreground regions.
-
-    See Also
-    --------
-    PoissonMixture
-
-    References
-    ----------
-    .. [1] Y. Al-Kofahi et al "Improved Automatic Detection and Segmentation
-    of Cell Nuclei in Histopathology Images" in IEEE Transactions on Biomedical
-    Engineering,vol.57,no.4,pp.847-52, 2010.
-    """
-
-    # generate a small number for conditioning calculations
-    Small = np.finfo(np.float).eps
-
-    # formulate unary data costs
-    D = np.stack((-np.log(Background + Small) / -np.log(Small),
-                 -np.log(Foreground + Small) / -np.log(Small)),
-                 axis=2)
-
-    # formulate pairwise label costs
-    Pairwise = 1 - np.eye(2)
-
-    # calculate edge weights between pixels if argument 'I' is provided
-    if I is not None:
-        if Sigma is None:
-            if issubclass(I.dtype.type, np.float):
-                Sigma = 0.1
-            elif I.dtype.type == np.uint8:
-                Sigma = 25
-
-        # formulate vertical and horizontal costs
-        H = np.exp(-np.abs(I[:, 0:-1].astype(np.float) -
-                   I[:, 1:].astype(np.float)) / (2 * Sigma**2))
-        V = np.exp(-np.abs(I[0:-1, :].astype(np.float) -
-                   I[1:, :].astype(np.float)) / (2 * Sigma**2))
-
-        # cut the graph with edge information from image
-        Mask = gc.cut_grid_graph(D, Pairwise, V, H, n_iter=-1,
-                                 algorithm='expansion')
-
-    else:
-        # cut the graph without edge information from image
-        Mask = gc.cut_grid_graph_simple(D, Pairwise, n_iter=-1,
-                                        algorithm='expansion')
-
-    # reshape solution to image size and return
-    return Mask.reshape(Foreground.shape[0], Foreground.shape[1]) == 1
-
-
-
-def constrained_log():
-
-    # return response
-
-    return
-
-
-def max_clustering():
-
-    # return label image
-
-    return
+    return Label
 
 
 def _multiway_refine(I, Response, Label, Background=5e-1, Smoothness=1e-5):
@@ -167,7 +75,7 @@ def _multiway_refine(I, Response, Label, Background=5e-1, Smoothness=1e-5):
     # get locations of connected components
     Locations = ms.find_objects(Components)
 
-    # i = 7, 16, 37 - examples of clumped objects
+    # i = 5, 14, 35
 
     # process each connected component containing possibly multiple nuclei
     for i in np.arange(1, N+1):
@@ -210,38 +118,42 @@ def _multiway_refine(I, Response, Label, Background=5e-1, Smoothness=1e-5):
             Indices = np.nonzero(RAG == j)[0]
 
             # for each nucleus in color
-            for k in np.arange(len(Indices)):
+            for k in Indices:
 
                 # define x, y coordinates of nucleus
                 cY, cX = np.nonzero(Component == k+1)
 
                 # model each nucleus with gaussian and add to component 'j'
-                Mean, Cov = _gaussian_model(Response[i-1], cX, cY)
+                Mean, Cov = _gaussian_model(Response[Locations[i-1]], cX, cY)
 
                 # define multivariate normal for object k
                 Model = mvn(Mean.flatten(), Cov.squeeze())
 
                 # add multivariate normal to channel 'j' of D
-                D[:, :, k+1] = np.maximum(D[:, :, k+1], Model.pdf(Pos))
+                D[:, :, j] = np.maximum(D[:, :, j], Model.pdf(Pos))
 
         # add background probability
         D[:, :, 0] = Background
 
         # score probabilities
-        for j in np.arange(1, D.shape[3]):
+        for j in np.arange(1, D.shape[2]):
             D[:, :, j] = 1 - D[:, :, j]
 
         # formulate image-based edge costs
-        Horizontal = np.exp(-np.abs(I[:, 0:-1] - I[:, 1:]))
-        Vertical = np.exp(-np.abs(I[0:-1, :] - I[1:, :]))
+        Patch = I[Locations[i-1]].astype(np.float)
+        Horizontal = np.exp(-np.abs(Patch[:, 0:-1] - Patch[:, 1:]))
+        Vertical = np.exp(-np.abs(Patch[0:-1, :] - Patch[1:, :]))
 
         # formulate label cost
-        X, Y = np.mgrid[:D.shape[3], :D.shape[3]]
+        X, Y = np.mgrid[:D.shape[2], :D.shape[2]]
         V = Smoothness * np.float_(np.abs(X-Y))
 
         # cut the graph
         Cut = gc.cut_grid_graph(D, V, Vertical, Horizontal,
                                 n_iter=-1, algorithm='swap')
+
+        # reshape the cut to the original component patch size
+        Cut = Cut.reshape(Component.shape[0], Component.shape[1])
 
         # update the values in the cut
         Cut = Cut + Total
@@ -282,15 +194,16 @@ def _gaussian_model(I, X, Y):
     Weights = I[Y, X]
 
     # stack object coordinates into matrix
-    Coords = np.hstack((Y, X))
+    Coords = np.vstack((Y, X))
 
     # estimate weighted mean
-    Mean = np.dot(Weights.transpose(), Coords) / np.sum(Weights)
+    Mean = np.dot(Coords, Weights) / np.sum(Weights)
 
     # estimate weighted covariance
-    MeanVec = np.dot(np.ones(Weights.shape), Mean)
-    Covariance = np.dot((Coords - MeanVec).transpose(),
-                        np.hstack((Weights, Weights)) * (Coords-MeanVec))
+    MeanVec = np.tile(Mean, (Coords.shape[1], 1)).transpose()
+    Covariance = np.dot((Coords - MeanVec),
+                        (np.vstack((Weights, Weights)) *
+                        (Coords-MeanVec)).transpose())
     Covariance = Covariance / (np.sum(Weights)-1)
 
     return Mean, Covariance
