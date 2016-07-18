@@ -46,8 +46,6 @@ def _multiway_refine(I, Response, Label, Background=1e-4, Smoothness=1e-4):
     # get locations of connected components
     Locations = ms.find_objects(Components)
 
-    # i = 5, 14, 35
-
     # process each connected component containing possibly multiple nuclei
     for i in np.arange(1, N+1):
 
@@ -67,11 +65,11 @@ def _multiway_refine(I, Response, Label, Background=1e-4, Smoothness=1e-4):
             # generate region adjacency graph
             Adjacency = htk.LabelRegionAdjacency(Component, Neighbors=4)
 
+            # layer region adjancency graph
+            Adjacency = htk.RegionAdjacencyLayer(Adjacency)
+
             # generate region adjacencey graph
             RAG = htk.GraphColorSequential(Adjacency)
-
-            # layer region adjancency graph
-            # RAG = htk.RegionAdjacencyLayer(RAG)
 
             # generate bounding box patch for graph cutting problem
             D = np.zeros((Component.shape[0], Component.shape[1], len(RAG)+1),
@@ -109,7 +107,7 @@ def _multiway_refine(I, Response, Label, Background=1e-4, Smoothness=1e-4):
 
             # score probabilities
             for j in np.arange(D.shape[2]):
-                D[:, :, j] = 1 - D[:, :, j]
+                D[:, :, j] = -np.log(D[:, :, j] + np.finfo(np.float).eps)
 
             # formulate image-based gradient costs
             Patch = I[Locations[i-1]].astype(np.float)
@@ -118,8 +116,6 @@ def _multiway_refine(I, Response, Label, Background=1e-4, Smoothness=1e-4):
 
             # formulate label cost
             V = 1 - np.identity(D.shape[2])
-            V[0, 1:] = 10
-            V[1:, 0] = 10
             V = Smoothness * V
 
             # cut the graph and reshape the output
@@ -131,6 +127,9 @@ def _multiway_refine(I, Response, Label, Background=1e-4, Smoothness=1e-4):
             # split the labels that were grouped during graph coloring
             Cut = htk.SplitLabel(Cut)
 
+            # capture number of objects in cut result
+            Max = Cut.max()
+
             # update the values in the cut
             Cut[Cut > 0] = Cut[Cut > 0] + Total
 
@@ -138,7 +137,7 @@ def _multiway_refine(I, Response, Label, Background=1e-4, Smoothness=1e-4):
             Refined[Components == i] = Cut[ComponentMask]
 
             # update object count
-            Total = Total + Cut.max()
+            Total = Total + Max
 
         else:  # single object component - no refinement necessary
 
@@ -173,6 +172,9 @@ def _gaussian_model(I, X, Y):
 
     # get image values at object locations for pixel weighting
     Weights = I[Y, X]
+
+    # zero weights below zero
+    Weights[Weights < 0] = 0
 
     # stack object coordinates into matrix
     Coords = np.vstack((Y, X))
