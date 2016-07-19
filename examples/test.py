@@ -1,11 +1,13 @@
+import histomicstk as htk
+import matplotlib.pyplot as plt
 import numpy as np
 import skimage.io as io
-import matplotlib.pyplot as plt
-import histomicstk as htk
 
+from NucleiCuts.nuclear_cut import nuclear_cut
 
 W = np.array([[0.650, 0.072, 0], [0.704, 0.990, 0], [0.286, 0.105, 0]])
-Directory = '/Users/lcoop22/Desktop/Detection/'
+# Directory = '/Users/lcoop22/Desktop/Detection/'
+Directory = '/home/cdeepakroy/Downloads/'
 
 Standard = io.imread(Directory + 'Hard.png')[:, :, :3]
 I1 = io.imread(Directory + 'Easy1.png')[:, :, :3]
