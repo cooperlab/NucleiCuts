@@ -1,0 +1,7 @@
+##############################################################################
+#
+# Add all python packages that depend on C libraries
+# and are not available on conda but present on pypi
+# here.
+#
+##############################################################################
