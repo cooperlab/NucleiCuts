@@ -1,5 +1,9 @@
 from binary_cut import binary_cut
-import histomicstk as htk
+import histomicstk.segmentation.label as lb
+import histomicstk.segmentation.nuclear as nc
+import histomicstk.segmentation as sg
+import histomicstk.utils as ut
+import histomicstk.filters.shape as sh
 import numpy as np
 import pygco as gc
 import scipy.ndimage.measurements as ms
@@ -10,21 +14,21 @@ def nuclear_cut(I, Sigma=25, SigmaMin=4*(2**0.5), SigmaMax=7*(2**0.5), r=10,
                 MinArea=20, MinWidth=5, Background=1e-4, Smoothness=1e-4):
 
     # generate poisson mixture model for nuclei
-    Tau, Fg, Bg = htk.PoissonMixture(I)
+    Tau, Fg, Bg = ut.PoissonMixture(I)
 
     # perform a graph cut to distinguish foreground and background
     Mask = binary_cut(Fg, Bg, I, Sigma)
 
     # constrained log filtering
-    Response = htk.cLoG(I, Mask, SigmaMin, SigmaMax)
+    Response = sh.cLoG(I, Mask, SigmaMin, SigmaMax)
 
     # cluster pixels to constrained log maxima
-    Label, Seeds, Max = htk.MaxClustering(Response.copy(), Mask, r)
+    Label, Seeds, Max = nc.MaxClustering(Response.copy(), Mask, r)
 
     # cleanup label image - split, then open by area and width
-    Label = htk.SplitLabel(Label)
-    Label = htk.AreaOpenLabel(Label, MinArea)
-    Label = htk.WidthOpenLabel(Label, MinWidth)
+    Label = lb.SplitLabel(Label)
+    Label = lb.AreaOpenLabel(Label, MinArea)
+    Label = lb.WidthOpenLabel(Label, MinWidth)
 
     # multiway graph cut refinement of max-clustering segmentation
     Refined = _multiway_refine(I, Response, Label, Background, Smoothness)
@@ -57,19 +61,19 @@ def _multiway_refine(I, Response, Label, Background=1e-4, Smoothness=1e-4):
         Component[~ComponentMask] = 0
 
         # condense label image
-        Component = htk.CondenseLabel(Component)
+        Component = lb.CondenseLabel(Component)
 
         # determine if more than one label value exists in Component
         if(Component.max() > 1):
 
             # generate region adjacency graph
-            Adjacency = htk.LabelRegionAdjacency(Component, Neighbors=4)
+            Adjacency = sg.LabelRegionAdjacency(Component, Neighbors=4)
 
             # layer region adjancency graph
-            Adjacency = htk.RegionAdjacencyLayer(Adjacency)
+            Adjacency = sg.RegionAdjacencyLayer(Adjacency)
 
             # generate region adjacencey graph
-            RAG = htk.GraphColorSequential(Adjacency)
+            RAG = sg.GraphColorSequential(Adjacency)
 
             # generate bounding box patch for graph cutting problem
             D = np.zeros((Component.shape[0], Component.shape[1], len(RAG)+1),
@@ -125,7 +129,7 @@ def _multiway_refine(I, Response, Label, Background=1e-4, Smoothness=1e-4):
                               Component.shape[1]).astype(np.uint32)
 
             # split the labels that were grouped during graph coloring
-            Cut = htk.SplitLabel(Cut)
+            Cut = lb.SplitLabel(Cut)
 
             # capture number of objects in cut result
             Max = Cut.max()
