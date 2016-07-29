@@ -76,19 +76,25 @@ def _multiway_refine(I, Response, Label, Background=1e-4, Smoothness=1e-4):
             RAG = sg.GraphColorSequential(Adjacency)
 
             # generate bounding box patch for graph cutting problem
-            D = np.zeros((Component.shape[0], Component.shape[1], len(RAG)+1),
-                         dtype=np.float)
+            D = np.zeros((Component.shape[0], Component.shape[1],
+                          np.max(RAG)+1), dtype=np.float)
             X, Y = np.meshgrid(range(0, Component.shape[1]),
                                range(0, Component.shape[0]))
             Pos = np.empty(X.shape + (2,))
             Pos[:, :, 1] = X
             Pos[:, :, 0] = Y
 
+            # initialize list of channels containing no non-degenerate objects
+            Delete = []
+
             # for each color in rag
             for j in np.arange(1, np.max(RAG)+1):
 
                 # get indices of cells to model in color 'j'
                 Indices = np.nonzero(RAG == j)[0]
+
+                # initialize count of component objects that were modeled
+                Count = 0
 
                 # for each nucleus in color
                 for k in Indices:
@@ -99,49 +105,75 @@ def _multiway_refine(I, Response, Label, Background=1e-4, Smoothness=1e-4):
                     # model each nucleus with gaussian and add to component 'j'
                     Mean, Cov = _gaussian_model(Response[Locations[i-1]],
                                                 cX, cY)
+                    try:
+                        Model = mvn(Mean.flatten(), Cov.squeeze())
+                    except:
+                        continue
 
-                    # define multivariate normal for object k
-                    Model = mvn(Mean.flatten(), Cov.squeeze())
+                    # increment counter
+                    Count += 1
 
                     # add multivariate normal to channel 'j' of D
                     D[:, :, j] = np.maximum(D[:, :, j], Model.pdf(Pos))
 
+                # add channel j to delete list of no objects were added
+                if(Count == 0):
+                    Delete.append(j)
+
             # add background probability
             D[:, :, 0] = Background
 
-            # score probabilities
-            for j in np.arange(D.shape[2]):
-                D[:, :, j] = -np.log(D[:, :, j] + np.finfo(np.float).eps)
+            # keep channels containing non-degenerate objects
+            if len(Delete):
+                Temp = np.zeros((Component.shape[0], Component.shape[1],
+                                 D.shape[2]-len(Delete)), dtype=np.float)
+                Channel = 0
+                for j in np.arange(D.shape[2]):
+                    if j not in Delete:
+                        Temp[:, :, Channel] = D[:, :, j]
+                        Channel += 1
+                D = Temp
 
-            # formulate image-based gradient costs
-            Patch = I[Locations[i-1]].astype(np.float)
-            Horizontal = np.exp(-np.abs(Patch[:, 0:-1] - Patch[:, 1:]))
-            Vertical = np.exp(-np.abs(Patch[0:-1, :] - Patch[1:, :]))
+            # component contains non-degenerate objects - cut
+            if(D.shape[2] > 1):
 
-            # formulate label cost
-            V = 1 - np.identity(D.shape[2])
-            V = Smoothness * V
+                # score probabilities
+                for j in np.arange(D.shape[2]):
+                    D[:, :, j] = -np.log(D[:, :, j] + np.finfo(np.float).eps)
 
-            # cut the graph and reshape the output
-            Cut = gc.cut_grid_graph(D, V, Vertical, Horizontal,
-                                    n_iter=-1, algorithm='swap')
-            Cut = Cut.reshape(Component.shape[0],
-                              Component.shape[1]).astype(np.uint32)
+                # formulate image-based gradient costs
+                Patch = I[Locations[i-1]].astype(np.float)
+                Horizontal = np.exp(-np.abs(Patch[:, 0:-1] - Patch[:, 1:]))
+                Vertical = np.exp(-np.abs(Patch[0:-1, :] - Patch[1:, :]))
 
-            # split the labels that were grouped during graph coloring
-            Cut = lb.SplitLabel(Cut)
+                # formulate label cost
+                V = 1 - np.identity(D.shape[2])
+                V = Smoothness * V
 
-            # capture number of objects in cut result
-            Max = Cut.max()
+                # cut the graph and reshape the output
+                Cut = gc.cut_grid_graph(D, V, Vertical, Horizontal,
+                                        n_iter=-1, algorithm='swap')
+                Cut = Cut.reshape(Component.shape[0],
+                                  Component.shape[1]).astype(np.uint32)
 
-            # update the values in the cut
-            Cut[Cut > 0] = Cut[Cut > 0] + Total
+                # split the labels that were grouped during graph coloring
+                Cut = lb.SplitLabel(Cut)
 
-            # embed the resulting cut into the output label image
-            Refined[Components == i] = Cut[ComponentMask]
+                # capture number of objects in cut result
+                Max = Cut.max()
 
-            # update object count
-            Total = Total + Max
+                # update the values in the cut
+                Cut[Cut > 0] = Cut[Cut > 0] + Total
+
+                # embed the resulting cut into the output label image
+                Refined[Components == i] = Cut[ComponentMask]
+
+                # update object count
+                Total = Total + Max
+
+            else:  # component is degenerate - contains no viable objects
+
+                Refined[Components == i] = 0
 
         else:  # single object component - no refinement necessary
 
