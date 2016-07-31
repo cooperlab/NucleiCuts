@@ -1,4 +1,4 @@
-from binary_cut import binary_cut
+from .binary_cut import binary_cut
 import histomicstk.segmentation.label as lb
 import histomicstk.segmentation.nuclear as nc
 import histomicstk.segmentation as sg
@@ -10,11 +10,82 @@ import scipy.ndimage.measurements as ms
 from scipy.stats import multivariate_normal as mvn
 
 
-def nuclear_cut(I, Sigma=25, SigmaMin=4*(2**0.5), SigmaMax=7*(2**0.5), r=10,
+def nuclear_cut(I, Sigma=None, SigmaMin=4*(2**0.5), SigmaMax=7*(2**0.5), r=10,
                 MinArea=20, MinWidth=5, Background=1e-4, Smoothness=1e-4):
+    """Performs segmentation of nuclei using constrained laplacian-of-gaussian
+    filtering, max-clustering, and multiway graph cutting refinement.
+
+    Parameters
+    ----------
+    I : array_like
+        An intensity image used for binary masking of nuclear regions and for
+        calculating continuity terms in graph cutting. Nuclei are assumed to be
+        darker than background.
+    Sigma : float
+        Parameter controling exponential decay rate of continuity term for
+        binary masking of nuclear areas. Units are intensity values.
+        Recommended ~10% of dynamic range of image. Defaults to 25 if 'I' is
+        type uint8 (range [0, 255]), and 0.1 if type is float (expected range
+        [0, 1]). Default value = None.
+    SigmaMin : float
+        Minimum scale for filter in constrained laplacian of gaussian
+        filtering. Default value corresponds to recommendation for 20X image.
+        Default value = 4*(2**0.5)
+    SigmaMax : float
+        Maximum scale for filter in constrained laplacian of gaussian
+        filtering. Default value corresponds to recommendation for 20X image.
+        Default value = 7*(2**0.5)
+    r : float
+        A scalar defining the radius for max clustering. Default value
+        corresponds to recommendation for 20X image.Default value = 10.
+    MinArea : float
+        Minimum object area for filtering max-clustering segmentation result.
+        Used for removing small object. Default value = 20
+    MinWidth : float
+        Minimum max object width for filtering max-clustering segmentation
+        result. Used for removing thin objects. Default value = 5.
+    Background : float
+        Probability level for background used in multiway graph cuttting.
+        Background channel is set uniformly to this probability.
+        Default value = 1e-4.
+    Smoothness: float
+        Smoothness parameter for multiway graph cutting. Used to weight label
+        change costs. Default value = 1e-4.
+
+    Returns
+    -------
+    Mask : array_like
+        A boolean-type binary mask indicating the foreground regions.
+
+    Notes
+    -----
+    The graph cutting algorithm is sensitive to the magnitudes of weights in
+    the data variable 'D'. Small probabilities will be magnified by the
+    logarithm in formulating this cost, and so we add a small positive value
+    to each in order to scale them appropriately.
+
+    See Also
+    --------
+    binary_cut
+
+    References
+    ----------
+    .. [1] Y. Al-Kofahi et al "Improved Automatic Detection and Segmentation
+    of Cell Nuclei in Histopathology Images" in IEEE Transactions on Biomedical
+    Engineering,vol.57,no.4,pp.847-52, 2010.
+    """
 
     # generate poisson mixture model for nuclei
     Tau, Fg, Bg = ut.PoissonMixture(I)
+
+    # set sigma based on type of 'I' if not provided
+    if Sigma is None:
+        if I.dtype == np.uint8:
+            Sigma = 25
+        elif np.issubclass_(I.dtype.type, np.float_):
+            Sigma = 0.1
+        else:
+            raise ValueError("Input 'I' type must be uint8 or float")
 
     # perform a graph cut to distinguish foreground and background
     Mask = binary_cut(Fg, Bg, I, Sigma)
@@ -24,6 +95,12 @@ def nuclear_cut(I, Sigma=25, SigmaMin=4*(2**0.5), SigmaMax=7*(2**0.5), r=10,
 
     # cluster pixels to constrained log maxima
     Label, Seeds, Max = nc.MaxClustering(Response.copy(), Mask, r)
+
+    # delete objects with negative maximum response value
+    Delete = np.nonzero(Max <= 0)[0]
+    Label = lb.DeleteLabel(Label, Delete + 1)
+    Seeds = np.delete(Seeds, Delete, axis=0)
+    Max = np.delete(Max, Delete)
 
     # cleanup label image - split, then open by area and width
     Label = lb.SplitLabel(Label)
