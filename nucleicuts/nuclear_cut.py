@@ -10,6 +10,15 @@ import scipy.ndimage.measurements as ms
 from scipy.stats import multivariate_normal as mvn
 
 
+Sigma=None
+SigmaMin=4*(2**0.5)
+SigmaMax=7*(2**0.5)
+r=10
+MinArea=20
+MinWidth=5
+Background=1e-4
+Smoothness=1e-4
+
 def nuclear_cut(I, Sigma=None, SigmaMin=4*(2**0.5), SigmaMax=7*(2**0.5), r=10,
                 MinArea=20, MinWidth=5, Background=1e-4, Smoothness=1e-4):
     """Performs segmentation of nuclei using constrained laplacian-of-gaussian
@@ -109,8 +118,13 @@ def nuclear_cut(I, Sigma=None, SigmaMin=4*(2**0.5), SigmaMax=7*(2**0.5), r=10,
 
     # multiway graph cut refinement of max-clustering segmentation
     Refined = _multiway_refine(I, Response, Label, Background, Smoothness)
+    
+    # cleanup output again - split, then open by area and width
+    Refined = lb.SplitLabel(Refined)
+    Refined = lb.AreaOpenLabel(Refined, MinArea)
+    Refined = lb.WidthOpenLabel(Refined, MinWidth)
 
-    return Label, Refined
+    return Label, Refined, Seeds
 
 
 def _multiway_refine(I, Response, Label, Background=1e-4, Smoothness=1e-4):
