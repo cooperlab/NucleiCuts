@@ -5,7 +5,7 @@ MAINTAINER Lee Cooper <lee.cooper@emory.edu>
 RUN cd / && \
     git clone https://github.com/yujiali/pygco.git && \
     cd pygco && \
-    make && \
+    make
 
 ENV PYTHONPATH=/pygco/pygco   
 
