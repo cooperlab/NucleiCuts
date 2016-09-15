@@ -1,4 +1,4 @@
-FROM dsarchive/histomicstk:lates
+FROM dsarchive/histomicstk:latest
 MAINTAINER Lee Cooper <lee.cooper@emory.edu>
 
 #install requirements of pygco
