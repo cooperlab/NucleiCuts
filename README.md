@@ -2,4 +2,4 @@
 NucleiCuts
 ===============
 
-An implementation of Al-Kofahi's 2010 paper on nuclear segmentation using graph cutting methods
+An implementation of Al-Kofahi's 2010 [paper](http://ieeexplore.ieee.org/document/5306149/) on nuclear segmentation using graph cutting methods
