@@ -5,11 +5,6 @@
 #
 #########################################################
 
-# temporarily moving this here until 1.3.1 becomes available on pypi
-# Add a binstar channel as follows to be able to install this via conda
-# conda config --add channels https://conda.binstar.org/cdeepakroy
-ctk-cli==1.3.1
-
 # large_image requires numpy==1.10.2
 numpy==1.10.2
 
