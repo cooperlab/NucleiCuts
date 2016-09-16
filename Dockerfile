@@ -21,4 +21,4 @@ RUN cd $my_plugin_path && \
     
 # use entrypoint provided by slicer_cli_web
 WORKDIR $my_plugin_path/Applications
-ENTRYPOINT ["/build/miniconda/bin/python" ,"/slicer_cli_web/server/cli_list_entrypoint.py"] 
+ENTRYPOINT ["/build/miniconda/bin/python" ,"/build/slicer_cli_web/server/cli_list_entrypoint.py"] 
